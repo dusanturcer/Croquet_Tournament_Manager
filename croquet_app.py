@@ -12,7 +12,10 @@ from datetime import datetime
 def init_db():
     conn = sqlite3.connect('tournaments.db')
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS tournaments
+    # Drop existing table to ensure correct schema
+    c.execute('DROP TABLE IF EXISTS tournaments')
+    # Create table with all required columns
+    c.execute('''CREATE TABLE tournaments
                  (id INTEGER PRIMARY KEY, name TEXT, created_date TEXT,
                   players TEXT, num_rounds INTEGER, current_round INTEGER DEFAULT 1,
                   matches TEXT, standings TEXT, byes TEXT, pairing_method TEXT)''')
@@ -123,18 +126,26 @@ def reset_player_stats(players):
         p['net_hoops'] = 0
 
 # Initialize DB
-init_db()
+try:
+    init_db()
+except sqlite3.OperationalError as e:
+    st.error(f"Database initialization failed: {e}")
+    st.stop()
 
 # Streamlit App
 st.markdown("<br>", unsafe_allow_html=True)
-st.title("ACC Croquet Tournament Manager")
+st.title("Croquet Tournament Manager")
 
 # Sidebar
 st.sidebar.title("Tournaments")
 
-conn_temp = get_conn()
-tournament_list = pd.read_sql("SELECT id, name, created_date FROM tournaments", conn_temp)
-conn_temp.close()
+try:
+    conn_temp = get_conn()
+    tournament_list = pd.read_sql("SELECT id, name, created_date FROM tournaments", conn_temp)
+    conn_temp.close()
+except sqlite3.OperationalError as e:
+    st.error(f"Failed to load tournaments: {e}")
+    st.stop()
 
 if 'selected_id' not in st.session_state:
     st.session_state.selected_id = 0
@@ -183,34 +194,43 @@ if selected_id == 0:
                     })
             create_btn = st.form_submit_button("Create Tournament")
             if create_btn and all_names_filled:
-                pairings, byes, has_repeat = generate_pairings(players, st.session_state.pairing_method)
-                conn_temp = get_conn()
-                cur = conn_temp.cursor()
-                cur.execute(
-                    "INSERT INTO tournaments (name, created_date, players, num_rounds, current_round, matches, standings, byes, pairing_method) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
-                    (st.session_state.tourney_name, datetime.now().isoformat(), str(players), st.session_state.num_rounds, str([]), str([]), str([byes]), st.session_state.pairing_method)
-                )
-                new_id = cur.lastrowid
-                conn_temp.commit()
-                conn_temp.close()
-                
-                st.success(f"Tournament '{st.session_state.tourney_name}' created!")
-                st.session_state.selected_id = new_id
-                st.session_state.current_pairings = pairings
-                st.session_state.current_byes = byes
-                st.session_state.has_repeat = has_repeat
-                st.session_state.current_round = 1
-                del st.session_state.num_players
-                del st.session_state.num_rounds
-                del st.session_state.tourney_name
-                del st.session_state.pairing_method
-                st.rerun()
+                try:
+                    pairings, byes, has_repeat = generate_pairings(players, st.session_state.pairing_method)
+                    conn_temp = get_conn()
+                    cur = conn_temp.cursor()
+                    cur.execute(
+                        "INSERT INTO tournaments (name, created_date, players, num_rounds, current_round, matches, standings, byes, pairing_method) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                        (st.session_state.tourney_name, datetime.now().isoformat(), str(players), st.session_state.num_rounds, str([]), str([]), str([byes]), st.session_state.pairing_method)
+                    )
+                    new_id = cur.lastrowid
+                    conn_temp.commit()
+                    conn_temp.close()
+                    
+                    st.success(f"Tournament '{st.session_state.tourney_name}' created!")
+                    st.session_state.selected_id = new_id
+                    st.session_state.current_pairings = pairings
+                    st.session_state.current_byes = byes
+                    st.session_state.has_repeat = has_repeat
+                    st.session_state.current_round = 1
+                    del st.session_state.num_players
+                    del st.session_state.num_rounds
+                    del st.session_state.tourney_name
+                    del st.session_state.pairing_method
+                    st.rerun()
+                except sqlite3.OperationalError as e:
+                    st.error(f"Failed to create tournament: {e}")
+                    st.stop()
             elif create_btn and not all_names_filled:
                 st.warning("Please fill all player names.")
 else:
-    conn_temp = get_conn()
-    tourney_data = pd.read_sql("SELECT * FROM tournaments WHERE id=?", conn_temp, params=(selected_id,))
-    conn_temp.close()
+    try:
+        conn_temp = get_conn()
+        tourney_data = pd.read_sql("SELECT * FROM tournaments WHERE id=?", conn_temp, params=(selected_id,))
+        conn_temp.close()
+    except sqlite3.OperationalError as e:
+        st.error(f"Failed to load tournament data: {e}")
+        st.stop()
+
     if not tourney_data.empty:
         tourney = tourney_data.iloc[0].to_dict()
     else:
@@ -225,7 +245,7 @@ else:
     matches = eval(tourney['matches']) if tourney['matches'] else []
     standings_history = eval(tourney['standings']) if tourney['standings'] else []
     byes_history = eval(tourney['byes']) if tourney['byes'] else []
-    pairing_method = tourney['pairing_method']
+    pairing_method = tourney.get('pairing_method', 'Swiss')  # Default to Swiss if not set
 
     if current_round > num_rounds:
         st.header(f"Tournament: {tourney['name']} - Final Standings")
@@ -332,13 +352,17 @@ else:
                 ]
                 standings_history.append(standings_this)
                 
-                conn_temp = get_conn()
-                conn_temp.execute(
-                    "UPDATE tournaments SET players=?, matches=?, standings=?, byes=?, current_round=? WHERE id=?",
-                    (str(players), str(matches), str(standings_history), str(byes_history), current_round + 1, selected_id)
-                )
-                conn_temp.commit()
-                conn_temp.close()
+                try:
+                    conn_temp = get_conn()
+                    conn_temp.execute(
+                        "UPDATE tournaments SET players=?, matches=?, standings=?, byes=?, current_round=? WHERE id=?",
+                        (str(players), str(matches), str(standings_history), str(byes_history), current_round + 1, selected_id)
+                    )
+                    conn_temp.commit()
+                    conn_temp.close()
+                except sqlite3.OperationalError as e:
+                    st.error(f"Failed to update tournament: {e}")
+                    st.stop()
                 
                 if 'current_pairings' in st.session_state:
                     del st.session_state.current_pairings
@@ -368,7 +392,6 @@ else:
             with pd.ExcelWriter('temp_standings.xlsx', engine='openpyxl') as writer:
                 player_names = [p['name'] for p in players]
                 sheet = "Final Standings"
-                # Use the latest standings
                 df_s = pd.DataFrame(standings_history[-1] if standings_history else [])
                 if not df_s.empty:
                     df_s['win_percentage'] = (df_s['wins'] / df_s['games_played'] * 100).round(2).fillna(0.00)
@@ -489,28 +512,36 @@ else:
                 ]
                 standings_history.append(standings_this)
                 
-                conn_temp = get_conn()
-                conn_temp.execute(
-                    "UPDATE tournaments SET players=?, matches=?, standings=? WHERE id=?",
-                    (str(players), str(edited_matches), str(standings_history), selected_id)
-                )
-                conn_temp.commit()
-                conn_temp.close()
+                try:
+                    conn_temp = get_conn()
+                    conn_temp.execute(
+                        "UPDATE tournaments SET players=?, matches=?, standings=? WHERE id=?",
+                        (str(players), str(edited_matches), str(standings_history), selected_id)
+                    )
+                    conn_temp.commit()
+                    conn_temp.close()
+                except sqlite3.OperationalError as e:
+                    st.error(f"Failed to update standings: {e}")
+                    st.stop()
                 
                 st.success("Standings updated based on edited match results!")
                 st.rerun()
 
 if selected_id != 0:
     if st.sidebar.button("Delete Tournament"):
-        conn_temp = get_conn()
-        conn_temp.execute("DELETE FROM tournaments WHERE id=?", (selected_id,))
-        conn_temp.commit()
-        conn_temp.close()
-        st.session_state.selected_id = 0
-        if 'current_pairings' in st.session_state:
-            del st.session_state.current_pairings
-            del st.session_state.current_byes
-            del st.session_state.has_repeat
-            del st.session_state.current_round
-        st.sidebar.success("Tournament deleted!")
-        st.rerun()
+        try:
+            conn_temp = get_conn()
+            conn_temp.execute("DELETE FROM tournaments WHERE id=?", (selected_id,))
+            conn_temp.commit()
+            conn_temp.close()
+            st.session_state.selected_id = 0
+            if 'current_pairings' in st.session_state:
+                del st.session_state.current_pairings
+                del st.session_state.current_byes
+                del st.session_state.has_repeat
+                del st.session_state.current_round
+            st.sidebar.success("Tournament deleted!")
+            st.rerun()
+        except sqlite3.OperationalError as e:
+            st.error(f"Failed to delete tournament: {e}")
+            st.stop()
