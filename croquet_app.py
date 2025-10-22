@@ -32,9 +32,13 @@ def sort_key(p):
     return (-p['score'], -p['net_hoops'], -p['hoops_scored'])
 
 def generate_pairings(entities, pairing_method="Swiss", modifying=True):
-    st.write(f"Generating pairings with method: {pairing_method}, Players: {[p['name'] for p in entities]}")
+    st.write(f"DEBUG: Generating pairings with method: {pairing_method}, Players: {[p['name'] for p in entities]}")
     if not entities:
         st.error("No players provided for pairing.")
+        return [], [], False
+
+    if len(entities) < 2:
+        st.error("Need at least 2 players to generate pairings.")
         return [], [], False
 
     if pairing_method == "Swiss":
@@ -48,10 +52,6 @@ def generate_pairings(entities, pairing_method="Swiss", modifying=True):
     best_byes = []
     has_repeat = False
     min_repeats = float('inf')
-
-    if n < 2:
-        st.error("Need at least 2 players to generate pairings.")
-        return [], [], False
 
     if n % 2 == 0:
         players_indices = list(range(n))
@@ -120,7 +120,7 @@ def generate_pairings(entities, pairing_method="Swiss", modifying=True):
             pl1['opponents'].add(p2)
             pl2['opponents'].add(p1)
 
-    st.write(f"Generated pairings: {best_pairings}, Byes: {best_byes}, Has repeat: {has_repeat}")
+    st.write(f"DEBUG: Generated pairings: {best_pairings}, Byes: {best_byes}, Has repeat: {has_repeat}")
     return best_pairings, best_byes, has_repeat
 
 def update_player_stats(pl, s_scored, s_conceded, is_win):
@@ -162,6 +162,7 @@ try:
     conn_temp = get_conn()
     tournament_list = pd.read_sql("SELECT id, name, created_date FROM tournaments", conn_temp)
     conn_temp.close()
+    st.write(f"DEBUG: Loaded {len(tournament_list)} tournaments from database.")
 except sqlite3.OperationalError as e:
     st.error(f"Failed to load tournaments: {e}")
     st.stop()
@@ -186,12 +187,14 @@ else:
 
 if selected_id == 0:
     with st.form("new_tournament"):
+        st.write("DEBUG: Rendering new_tournament form")
         tourney_name = st.text_input("Tournament Name:")
         num_players = st.number_input("Number of players:", min_value=2, value=4)
         num_rounds = st.number_input("Number of Rounds:", min_value=1, value=5)
         pairing_method = st.selectbox("Pairing Method:", ["Swiss", "Random"])
         submitted = st.form_submit_button("Next: Enter Player Names")
         if submitted:
+            st.write(f"DEBUG: New tournament form submitted. Name: {tourney_name}, Players: {num_players}, Rounds: {num_rounds}, Method: {pairing_method}")
             if not tourney_name:
                 st.error("Please enter a tournament name.")
             else:
@@ -199,16 +202,17 @@ if selected_id == 0:
                 st.session_state.num_rounds = num_rounds
                 st.session_state.tourney_name = tourney_name
                 st.session_state.pairing_method = pairing_method
-                st.write(f"Session state after new_tournament: {st.session_state}")
+                st.write(f"DEBUG: Session state set: {st.session_state}")
                 st.rerun()
     
     if 'num_players' in st.session_state:
         with st.form("players_form"):
+            st.write("DEBUG: Rendering players_form")
             players = []
             all_names_filled = True
             unique_names = set()
             for i in range(st.session_state.num_players):
-                name = st.text_input(f"Player {i+1} name:", key=f"p{i}")
+                name = st.text_input(f"Player {i+1} name:", key=f"player_{i}_{st.session_state.get('tourney_name', 'new')}")
                 if not name:
                     all_names_filled = False
                 elif name in unique_names:
@@ -222,13 +226,13 @@ if selected_id == 0:
                     })
             create_btn = st.form_submit_button("Create Tournament")
             if create_btn:
-                st.write(f"Create button clicked. All names filled: {all_names_filled}, Players: {[p['name'] for p in players]}")
+                st.write(f"DEBUG: Create Tournament clicked. All names filled: {all_names_filled}, Players: {[p['name'] for p in players]}")
                 if not all_names_filled:
                     st.error("Please fill all player names and ensure they are unique.")
                 else:
                     try:
                         pairing_method = st.session_state.get('pairing_method', 'Swiss')
-                        st.write(f"Creating tournament with name: {st.session_state.tourney_name}, Pairing method: {pairing_method}")
+                        st.write(f"DEBUG: Creating tournament. Name: {st.session_state.tourney_name}, Pairing method: {pairing_method}")
                         pairings, byes, has_repeat = generate_pairings(players, pairing_method)
                         if not pairings and not byes:
                             st.error("Failed to generate pairings. Please try again.")
@@ -242,26 +246,27 @@ if selected_id == 0:
                         new_id = cur.lastrowid
                         conn_temp.commit()
                         conn_temp.close()
-                        
-                        st.success(f"Tournament '{st.session_state.tourney_name}' created with ID {new_id}!")
+                        st.write(f"DEBUG: Tournament inserted with ID {new_id}")
                         st.session_state.selected_id = new_id
                         st.session_state.current_pairings = pairings
                         st.session_state.current_byes = byes
                         st.session_state.has_repeat = has_repeat
                         st.session_state.current_round = 1
-                        # Clear session state to prevent stale data
+                        st.success(f"Tournament '{st.session_state.tourney_name}' created with ID {new_id}!")
                         for key in ['num_players', 'num_rounds', 'tourney_name', 'pairing_method']:
                             if key in st.session_state:
                                 del st.session_state[key]
+                        st.write("DEBUG: Session state cleared, rerunning")
                         st.rerun()
-                    except (sqlite3.OperationalError, Exception) as e:
-                        st.error(f"Failed to create tournament: {e}")
+                    except Exception as e:
+                        st.error(f"Failed to create tournament: {str(e)}")
                         st.stop()
 else:
     try:
         conn_temp = get_conn()
         tourney_data = pd.read_sql("SELECT * FROM tournaments WHERE id=?", conn_temp, params=(selected_id,))
         conn_temp.close()
+        st.write(f"DEBUG: Loaded tournament data for ID {selected_id}")
     except sqlite3.OperationalError as e:
         st.error(f"Failed to load tournament data: {e}")
         st.stop()
@@ -281,7 +286,7 @@ else:
     standings_history = eval(tourney['standings']) if tourney['standings'] else []
     byes_history = eval(tourney['byes']) if tourney['byes'] else []
     pairing_method = tourney.get('pairing_method', 'Swiss')
-    st.write(f"Loaded tournament with ID {selected_id}, Name: {tourney['name']}, Pairing method: {pairing_method}")
+    st.write(f"DEBUG: Loaded tournament. Name: {tourney['name']}, Pairing method: {pairing_method}")
 
     if current_round > num_rounds:
         st.header(f"Tournament: {tourney['name']} - Final Standings")
