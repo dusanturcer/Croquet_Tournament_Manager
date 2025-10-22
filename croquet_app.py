@@ -127,7 +127,7 @@ init_db()
 
 # Streamlit App
 st.markdown("<br>", unsafe_allow_html=True)
-st.title("Croquet Tournament Manager")
+st.title("ACC Croquet Tournament Manager")
 
 # Sidebar
 st.sidebar.title("Tournaments")
