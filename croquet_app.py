@@ -20,10 +20,10 @@ def init_db():
         conn.commit()
         conn.close()
         st.success("Database initialized successfully.")
-        print("Database initialized successfully.")
+        print("DEBUG: Database initialized successfully.")
     except sqlite3.OperationalError as e:
         st.error(f"Database initialization failed: {e}")
-        print(f"Database initialization failed: {e}")
+        print(f"ERROR: Database initialization failed: {e}")
         st.stop()
 
 def get_conn():
@@ -156,7 +156,7 @@ try:
     init_db()
 except sqlite3.OperationalError as e:
     st.error(f"Database initialization failed: {e}")
-    print(f"Database initialization failed: {e}")
+    print(f"ERROR: Database initialization failed: {e}")
     st.stop()
 
 # Streamlit App
@@ -174,7 +174,7 @@ try:
     print(f"DEBUG: Loaded {len(tournament_list)} tournaments from database.")
 except sqlite3.OperationalError as e:
     st.error(f"Failed to load tournaments: {e}")
-    print(f"Failed to load tournaments: {e}")
+    print(f"ERROR: Failed to load tournaments: {e}")
     st.stop()
 
 if 'selected_id' not in st.session_state:
@@ -196,96 +196,79 @@ else:
     st.session_state.selected_id = 0
 
 if selected_id == 0:
-    st.write("DEBUG: Rendering new_tournament form")
-    print("DEBUG: Rendering new_tournament form")
-    with st.form("new_tournament", clear_on_submit=True):
+    st.write("DEBUG: Rendering tournament creation form")
+    print("DEBUG: Rendering tournament creation form")
+    with st.form("tournament_form", clear_on_submit=True):
+        st.subheader("Create New Tournament")
         tourney_name = st.text_input("Tournament Name:", key="tourney_name")
         num_players = st.number_input("Number of players:", min_value=2, value=4, key="num_players")
         num_rounds = st.number_input("Number of Rounds:", min_value=1, value=5, key="num_rounds")
         pairing_method = st.selectbox("Pairing Method:", ["Swiss", "Random"], key="pairing_method")
-        submitted = st.form_submit_button("Next: Enter Player Names")
-        if submitted:
-            st.write(f"DEBUG: New tournament form submitted. Name: {tourney_name}, Players: {num_players}, Rounds: {num_rounds}, Method: {pairing_method}")
-            print(f"DEBUG: New tournament form submitted. Name: {tourney_name}, Players: {num_players}, Rounds: {num_rounds}, Method: {pairing_method}")
+        st.subheader("Enter Player Names")
+        players = []
+        all_names_filled = True
+        unique_names = set()
+        for i in range(int(num_players)):
+            name = st.text_input(f"Player {i+1} name:", key=f"player_{i}_{tourney_name or 'new'}_{random.randint(1, 10000)}")
+            if not name:
+                all_names_filled = False
+            elif name in unique_names:
+                all_names_filled = False
+                st.error(f"Duplicate player name: {name}")
+                print(f"ERROR: Duplicate player name: {name}")
+            else:
+                unique_names.add(name)
+                players.append({
+                    'name': name, 'score': 0.0, 'games_played': 0, 'wins': 0, 'losses': 0,
+                    'hoops_scored': 0, 'hoops_conceded': 0, 'net_hoops': 0, 'opponents': set()
+                })
+        create_btn = st.form_submit_button("Create Tournament")
+        if create_btn:
+            st.write(f"DEBUG: Create Tournament clicked. Name: {tourney_name}, Players: {num_players}, Rounds: {num_rounds}, Method: {pairing_method}, All names filled: {all_names_filled}")
+            print(f"DEBUG: Create Tournament clicked. Name: {tourney_name}, Players: {num_players}, Rounds: {num_rounds}, Method: {pairing_method}, All names filled: {all_names_filled}")
             if not tourney_name:
                 st.error("Please enter a tournament name.")
                 print("ERROR: Tournament name empty.")
+            elif not all_names_filled:
+                st.error("Please fill all player names and ensure they are unique.")
+                print("ERROR: Not all player names filled or duplicates detected.")
             else:
-                st.session_state.num_players = num_players
-                st.session_state.num_rounds = num_rounds
-                st.session_state.tourney_name = tourney_name
-                st.session_state.pairing_method = pairing_method
-                st.session_state.form_step = "players"
-                st.write(f"DEBUG: Session state set: {st.session_state}")
-                print(f"DEBUG: Session state set: {st.session_state}")
-    
-    if st.session_state.get('form_step') == "players":
-        st.write("DEBUG: Rendering players_form")
-        print("DEBUG: Rendering players_form")
-        with st.form("players_form", clear_on_submit=True):
-            players = []
-            all_names_filled = True
-            unique_names = set()
-            for i in range(st.session_state.num_players):
-                name = st.text_input(f"Player {i+1} name:", key=f"player_{i}_{st.session_state.tourney_name}_{random.randint(1, 10000)}")
-                if not name:
-                    all_names_filled = False
-                elif name in unique_names:
-                    all_names_filled = False
-                    st.error(f"Duplicate player name: {name}")
-                    print(f"ERROR: Duplicate player name: {name}")
-                else:
-                    unique_names.add(name)
-                    players.append({
-                        'name': name, 'score': 0.0, 'games_played': 0, 'wins': 0, 'losses': 0,
-                        'hoops_scored': 0, 'hoops_conceded': 0, 'net_hoops': 0, 'opponents': set()
-                    })
-            create_btn = st.form_submit_button("Create Tournament")
-            if create_btn:
-                st.write(f"DEBUG: Create Tournament clicked. All names filled: {all_names_filled}, Players: {[p['name'] for p in players if p['name']]}")
-                print(f"DEBUG: Create Tournament clicked. All names filled: {all_names_filled}, Players: {[p['name'] for p in players if p['name']]}")
-                if not all_names_filled:
-                    st.error("Please fill all player names and ensure they are unique.")
-                    print("ERROR: Not all player names filled or duplicates detected.")
-                else:
-                    try:
-                        pairing_method = st.session_state.get('pairing_method', 'Swiss')
-                        st.write(f"DEBUG: Creating tournament. Name: {st.session_state.tourney_name}, Pairing method: {pairing_method}")
-                        print(f"DEBUG: Creating tournament. Name: {st.session_state.tourney_name}, Pairing method: {pairing_method}")
-                        pairings, byes, has_repeat = generate_pairings(players, pairing_method)
-                        if not pairings and not byes:
-                            st.error("Failed to generate pairings. Please try again.")
-                            print("ERROR: Failed to generate pairings.")
-                            st.stop()
-                        conn_temp = get_conn()
-                        cur = conn_temp.cursor()
-                        cur.execute(
-                            "INSERT INTO tournaments (name, created_date, players, num_rounds, current_round, matches, standings, byes, pairing_method) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
-                            (st.session_state.tourney_name, datetime.now().isoformat(), str(players), st.session_state.num_rounds, str([]), str([]), str([byes]), pairing_method)
-                        )
-                        new_id = cur.lastrowid
-                        conn_temp.commit()
-                        conn_temp.close()
-                        st.write(f"DEBUG: Tournament inserted with ID {new_id}")
-                        print(f"DEBUG: Tournament inserted with ID {new_id}")
-                        st.session_state.selected_id = new_id
-                        st.session_state.current_pairings = pairings
-                        st.session_state.current_byes = byes
-                        st.session_state.has_repeat = has_repeat
-                        st.session_state.current_round = 1
-                        st.session_state.form_step = "created"
-                        st.success(f"Tournament '{st.session_state.tourney_name}' created with ID {new_id}!")
-                        print(f"DEBUG: Tournament '{st.session_state.tourney_name}' created with ID {new_id}")
-                        for key in ['num_players', 'num_rounds', 'tourney_name', 'pairing_method', 'form_step']:
+                try:
+                    st.write(f"DEBUG: Creating tournament. Name: {tourney_name}, Pairing method: {pairing_method}")
+                    print(f"DEBUG: Creating tournament. Name: {tourney_name}, Pairing method: {pairing_method}")
+                    pairings, byes, has_repeat = generate_pairings(players, pairing_method)
+                    if not pairings and not byes:
+                        st.error("Failed to generate pairings. Please try again.")
+                        print("ERROR: Failed to generate pairings.")
+                        st.stop()
+                    conn_temp = get_conn()
+                    cur = conn_temp.cursor()
+                    cur.execute(
+                        "INSERT INTO tournaments (name, created_date, players, num_rounds, current_round, matches, standings, byes, pairing_method) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                        (tourney_name, datetime.now().isoformat(), str(players), num_rounds, str([]), str([]), str([byes]), pairing_method)
+                    )
+                    new_id = cur.lastrowid
+                    conn_temp.commit()
+                    conn_temp.close()
+                    st.write(f"DEBUG: Tournament inserted with ID {new_id}")
+                    print(f"DEBUG: Tournament inserted with ID {new_id}")
+                    st.session_state.selected_id = new_id
+                    st.session_state.current_pairings = pairings
+                    st.session_state.current_byes = byes
+                    st.session_state.has_repeat = has_repeat
+                    st.session_state.current_round = 1
+                    st.success(f"Tournament '{tourney_name}' created with ID {new_id}!")
+                    print(f"DEBUG: Tournament '{tourney_name}' created with ID {new_id}")
+                    if st.button("Proceed to Tournament"):
+                        for key in ['num_players', 'num_rounds', 'tourney_name', 'pairing_method']:
                             if key in st.session_state:
                                 del st.session_state[key]
-                        st.write("DEBUG: Session state cleared")
-                        print("DEBUG: Session state cleared")
+                        st.session_state.form_step = "created"
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to create tournament: {str(e)}")
-                        print(f"ERROR: Failed to create tournament: {str(e)}")
-                        st.stop()
+                except Exception as e:
+                    st.error(f"Failed to create tournament: {str(e)}")
+                    print(f"ERROR: Failed to create tournament: {str(e)}")
+                    st.stop()
 else:
     try:
         conn_temp = get_conn()
@@ -295,7 +278,7 @@ else:
         print(f"DEBUG: Loaded tournament data for ID {selected_id}")
     except sqlite3.OperationalError as e:
         st.error(f"Failed to load tournament data: {e}")
-        print(f"Failed to load tournament data: {e}")
+        print(f"ERROR: Failed to load tournament data: {e}")
         st.stop()
 
     if not tourney_data.empty:
@@ -433,7 +416,7 @@ else:
                     conn_temp.close()
                 except sqlite3.OperationalError as e:
                     st.error(f"Failed to update tournament: {e}")
-                    print(f"Failed to update tournament: {e}")
+                    print(f"ERROR: Failed to update tournament: {e}")
                     st.stop()
                 
                 if 'current_pairings' in st.session_state:
@@ -468,7 +451,7 @@ else:
                 sheet = "Final Standings"
                 df_s = pd.DataFrame(standings_history[-1] if standings_history else [])
                 if not df_s.empty:
-                    df_s['win_percentage'] = (df_s['wins'] / df_stand['games_played'] * 100).round(2).fillna(0.00)
+                    df_s['win_percentage'] = (df_s['wins'] / df_s['games_played'] * 100).round(2).fillna(0.00)
                 else:
                     sorted_players = sorted(players, key=sort_key)
                     df_s = pd.DataFrame([
@@ -597,7 +580,7 @@ else:
                     conn_temp.close()
                 except sqlite3.OperationalError as e:
                     st.error(f"Failed to update standings: {e}")
-                    print(f"Failed to update standings: {e}")
+                    print(f"ERROR: Failed to update standings: {e}")
                     st.stop()
                 
                 st.success("Standings updated based on edited match results!")
@@ -622,5 +605,5 @@ if selected_id != 0:
             st.rerun()
         except sqlite3.OperationalError as e:
             st.error(f"Failed to delete tournament: {e}")
-            print(f"Failed to delete tournament: {e}")
+            print(f"ERROR: Failed to delete tournament: {e}")
             st.stop()
