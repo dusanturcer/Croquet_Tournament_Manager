@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import itertools
 import csv
+import random
 from openpyxl.styles import Alignment
 from openpyxl import load_workbook
 from datetime import datetime
@@ -14,7 +15,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS tournaments
                  (id INTEGER PRIMARY KEY, name TEXT, created_date TEXT,
                   players TEXT, num_rounds INTEGER, current_round INTEGER DEFAULT 1,
-                  matches TEXT, standings TEXT, byes TEXT)''')
+                  matches TEXT, standings TEXT, byes TEXT, pairing_method TEXT)''')
     conn.commit()
     conn.close()
 
@@ -25,8 +26,13 @@ def get_conn():
 def sort_key(p):
     return (-p['score'], -p['net_hoops'], -p['hoops_scored'])
 
-def generate_pairings(entities, modifying=True):
-    entity_list = sorted(entities, key=sort_key)
+def generate_pairings(entities, pairing_method="Swiss", modifying=True):
+    if pairing_method == "Swiss":
+        entity_list = sorted(entities, key=sort_key)
+    else:  # Random
+        entity_list = entities.copy()
+        random.shuffle(entity_list)
+
     n = len(entity_list)
     best_pairings = []
     best_byes = []
@@ -153,11 +159,13 @@ if selected_id == 0:
         tourney_name = st.text_input("Tournament Name:")
         num_players = st.number_input("Number of players:", min_value=2, value=4)
         num_rounds = st.number_input("Number of Rounds:", min_value=1, value=5)
+        pairing_method = st.selectbox("Pairing Method:", ["Swiss", "Random"])
         submitted = st.form_submit_button("Next: Enter Player Names")
         if submitted and tourney_name:
             st.session_state.num_players = num_players
             st.session_state.num_rounds = num_rounds
             st.session_state.tourney_name = tourney_name
+            st.session_state.pairing_method = pairing_method
             st.rerun()
     
     if 'num_players' in st.session_state:
@@ -175,12 +183,12 @@ if selected_id == 0:
                     })
             create_btn = st.form_submit_button("Create Tournament")
             if create_btn and all_names_filled:
-                pairings, byes, has_repeat = generate_pairings(players)
+                pairings, byes, has_repeat = generate_pairings(players, st.session_state.pairing_method)
                 conn_temp = get_conn()
                 cur = conn_temp.cursor()
                 cur.execute(
-                    "INSERT INTO tournaments (name, created_date, players, num_rounds, current_round, matches, standings, byes) VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
-                    (st.session_state.tourney_name, datetime.now().isoformat(), str(players), st.session_state.num_rounds, str([]), str([]), str([byes]))
+                    "INSERT INTO tournaments (name, created_date, players, num_rounds, current_round, matches, standings, byes, pairing_method) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                    (st.session_state.tourney_name, datetime.now().isoformat(), str(players), st.session_state.num_rounds, str([]), str([]), str([byes]), st.session_state.pairing_method)
                 )
                 new_id = cur.lastrowid
                 conn_temp.commit()
@@ -195,6 +203,7 @@ if selected_id == 0:
                 del st.session_state.num_players
                 del st.session_state.num_rounds
                 del st.session_state.tourney_name
+                del st.session_state.pairing_method
                 st.rerun()
             elif create_btn and not all_names_filled:
                 st.warning("Please fill all player names.")
@@ -216,6 +225,7 @@ else:
     matches = eval(tourney['matches']) if tourney['matches'] else []
     standings_history = eval(tourney['standings']) if tourney['standings'] else []
     byes_history = eval(tourney['byes']) if tourney['byes'] else []
+    pairing_method = tourney['pairing_method']
 
     if current_round > num_rounds:
         st.header(f"Tournament: {tourney['name']} - Final Standings")
@@ -249,7 +259,7 @@ else:
 
     if current_round <= num_rounds:
         if 'current_pairings' not in st.session_state or current_round != st.session_state.get('current_round', 0):
-            pairings, byes, has_repeat = generate_pairings(players)
+            pairings, byes, has_repeat = generate_pairings(players, pairing_method)
             st.session_state.current_pairings = pairings
             st.session_state.current_byes = byes
             st.session_state.has_repeat = has_repeat
