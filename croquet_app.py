@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import itertools
-import csv
 import random
 from openpyxl.styles import Alignment
 from openpyxl import load_workbook
@@ -10,17 +9,21 @@ from datetime import datetime
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect('tournaments.db')
-    c = conn.cursor()
-    # Drop existing table to ensure correct schema
-    c.execute('DROP TABLE IF EXISTS tournaments')
-    # Create table with all required columns
-    c.execute('''CREATE TABLE tournaments
-                 (id INTEGER PRIMARY KEY, name TEXT, created_date TEXT,
-                  players TEXT, num_rounds INTEGER, current_round INTEGER DEFAULT 1,
-                  matches TEXT, standings TEXT, byes TEXT, pairing_method TEXT)''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('tournaments.db')
+        c = conn.cursor()
+        # Drop and recreate table to ensure correct schema
+        c.execute('DROP TABLE IF EXISTS tournaments')
+        c.execute('''CREATE TABLE tournaments
+                     (id INTEGER PRIMARY KEY, name TEXT, created_date TEXT,
+                      players TEXT, num_rounds INTEGER, current_round INTEGER DEFAULT 1,
+                      matches TEXT, standings TEXT, byes TEXT, pairing_method TEXT)''')
+        conn.commit()
+        conn.close()
+        st.write("Database initialized successfully.")
+    except sqlite3.OperationalError as e:
+        st.error(f"Database initialization failed: {e}")
+        st.stop()
 
 def get_conn():
     return sqlite3.connect('tournaments.db')
@@ -30,6 +33,7 @@ def sort_key(p):
     return (-p['score'], -p['net_hoops'], -p['hoops_scored'])
 
 def generate_pairings(entities, pairing_method="Swiss", modifying=True):
+    st.write(f"Generating pairings with method: {pairing_method}")
     if pairing_method == "Swiss":
         entity_list = sorted(entities, key=sort_key)
     else:  # Random
@@ -74,6 +78,10 @@ def generate_pairings(entities, pairing_method="Swiss", modifying=True):
                 if valid and len(players_covered) == n - 1:
                     pairing_combinations.append((comb, bye_idx))
 
+    # Shuffle combinations for Random to avoid bias
+    if pairing_method == "Random":
+        random.shuffle(pairing_combinations)
+
     for comb in pairing_combinations:
         if n % 2 == 0:
             pairs = [(entity_list[p1]['name'], entity_list[p2]['name']) for p1, p2 in comb]
@@ -102,6 +110,7 @@ def generate_pairings(entities, pairing_method="Swiss", modifying=True):
             pl1['opponents'].add(p2)
             pl2['opponents'].add(p1)
 
+    st.write(f"Generated pairings: {best_pairings}, Byes: {best_byes}, Has repeat: {has_repeat}")
     return best_pairings, best_byes, has_repeat
 
 def update_player_stats(pl, s_scored, s_conceded, is_win):
@@ -177,6 +186,7 @@ if selected_id == 0:
             st.session_state.num_rounds = num_rounds
             st.session_state.tourney_name = tourney_name
             st.session_state.pairing_method = pairing_method
+            st.write(f"Session state set: {st.session_state}")
             st.rerun()
     
     if 'num_players' in st.session_state:
@@ -195,6 +205,7 @@ if selected_id == 0:
             create_btn = st.form_submit_button("Create Tournament")
             if create_btn and all_names_filled:
                 try:
+                    st.write(f"Creating tournament with pairing method: {st.session_state.get('pairing_method', 'Not set')}")
                     pairings, byes, has_repeat = generate_pairings(players, st.session_state.pairing_method)
                     conn_temp = get_conn()
                     cur = conn_temp.cursor()
@@ -219,6 +230,9 @@ if selected_id == 0:
                     st.rerun()
                 except sqlite3.OperationalError as e:
                     st.error(f"Failed to create tournament: {e}")
+                    st.stop()
+                except KeyError as e:
+                    st.error(f"Session state error: {e}")
                     st.stop()
             elif create_btn and not all_names_filled:
                 st.warning("Please fill all player names.")
@@ -245,7 +259,8 @@ else:
     matches = eval(tourney['matches']) if tourney['matches'] else []
     standings_history = eval(tourney['standings']) if tourney['standings'] else []
     byes_history = eval(tourney['byes']) if tourney['byes'] else []
-    pairing_method = tourney.get('pairing_method', 'Swiss')  # Default to Swiss if not set
+    pairing_method = tourney.get('pairing_method', 'Swiss')
+    st.write(f"Loaded tournament with pairing method: {pairing_method}")
 
     if current_round > num_rounds:
         st.header(f"Tournament: {tourney['name']} - Final Standings")
